@@ -14,7 +14,7 @@ from openpilot.common.numpy_fast import interp
 from openpilot.selfdrive.controls.ntune import ntune_scc_get
 
 # Default lead acceleration decay set to 50% at 1s
-_LEAD_ACCEL_TAU = 1.5
+_LEAD_ACCEL_TAU = 1.0
 
 # radar tracks
 SPEED, ACCEL = 0, 1     # Kalman filter states enum
