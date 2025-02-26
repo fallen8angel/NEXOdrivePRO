@@ -376,11 +376,12 @@ struct CarControl {
 
   orientationNED @13 :List(Float32);
   angularVelocity @14 :List(Float32);
+  currentCurvature @17 :Float32;  # From vehicle model
 
   cruiseControl @4 :CruiseControl;
   hudControl @5 :HUDControl;
 
-  steerRatio @17 :Float32;
+  steerRatio @18 :Float32;
 
   struct Actuators {
     # lateral commands, mutually exclusive
@@ -662,6 +663,7 @@ struct CarParams {
     chryslerCusw @30;
     psa @31;
     fcaGiorgio @32;
+    rivian @33;
   }
 
   enum SteerControlType {

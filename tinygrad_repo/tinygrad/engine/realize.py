@@ -2,6 +2,7 @@ from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import all_same, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
+from tinygrad.helpers import DEVECTORIZE, time_to_str
 from tinygrad.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -65,10 +66,6 @@ class CompiledRunner(Runner):
       assert len(local_size) == 3, "local size must have len 3"
     return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
-class EmptyOp(Runner):
-  def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False): pass
-
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False):
@@ -103,11 +100,13 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, bytes, int, int, bool], CompiledRunner] = {}
+method_cache: dict[tuple[str, bytes, tuple[int, ...], bool], CompiledRunner] = {}
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
-  ckey = (device, ast.key, BEAM.value, NOOPT.value, False)
+  # TODO: this should be all context relevant to rendering
+  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
+  ckey = (device, ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (device.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
+  bkey = (device.split(":")[0], ast.key, context, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
@@ -134,7 +133,7 @@ class ExecItem:
       if DEBUG >= 2:
         lds_est = sym_infer(self.prg.estimates.lds, var_vals)
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
-        ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
+        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
         print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(41-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
               (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_est/((et or 1e-20)*1e9):9.2f} GFLOPS {mem_est/((et or 1e-20)*1e9):6.1f}|{lds_est/((et or 1e-20)*1e9):<7.1f} GB/s)" +  # noqa: E501
                f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}"))
@@ -144,11 +143,10 @@ class ExecItem:
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
   (UPat(Ops.SINK, name="sink"), lambda ctx,sink: (runner:=get_runner(ctx[0].device, sink), [ctx[x] for x in runner.p.globals])),
-  (UPat(Ops.EMPTY), lambda ctx: (EmptyOp(ctx[0]), list(ctx))),
   (UPat(Ops.BUFFER_VIEW), lambda ctx: (ViewOp(ctx[0]), list(ctx))),
-  (UPat(Ops.COPY, name="copy"), lambda ctx,copy: ((BufferXfer(copy.size, ctx[0].device, ctx[1].device) \
+  (UPat(Ops.COPY, name="copy"), lambda ctx,copy: ((BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
       if hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx]) \
-      else BufferCopy(copy.size, ctx[0].device, ctx[1].device)), list(ctx))),
+      else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)), list(ctx))),
 ])
 def lower_schedule_item(si:ScheduleItem) -> ExecItem: return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata)
 
