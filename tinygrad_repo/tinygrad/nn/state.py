@@ -1,19 +1,19 @@
 import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
-from collections import OrderedDict
 from typing import Union, Optional, Any, Callable, BinaryIO, Iterable
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T
 from tinygrad.shape.view import strides_for_shape
+from tinygrad.multi import MultiLazyBuffer
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
-    if t.ndim != 1 or t.dtype != dtypes.uint8: raise ValueError("Tensor must be 1d and of dtype uint8!")
+    if len(t.shape) != 1 or t.dtype != dtypes.uint8: raise ValueError("Tensor must be 1d and of dtype uint8!")
     self._position, self._tensor = 0, t
 
   def readable(self) -> bool: return True
   def read(self, size: int = -1) -> bytes:
-    if (buf:=super().read(size)) is None: raise ValueError("io.RawIOBase.read returned None") # only happens if readinto returns None (never)
+    if (buf:=super().read(size)) is None: raise ValueError("io.RawIOBase.read returned None") # only happens, if readinto returns None (never)
     return buf
   def readinto(self, buffer: Any) -> int:
     data = self._tensor[self._position:self._position+len(buffer)].data()
@@ -76,7 +76,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:Optional[dict[str, Any
     headers[k] = {'dtype': inverse_safe_dtypes[v.dtype], 'shape': list(v.shape), 'data_offsets':[offset, offset+v.nbytes()]}
     offset += v.nbytes()
   j = json.dumps(headers, separators=(',', ':'))
-  j += "\x20"*(round_up(len(j),8)-len(j))
+  j += "\x20"*((8-len(j)%8)%8)
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:8].bitcast(dtypes.int64).assign([len(j)])
@@ -85,6 +85,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:Optional[dict[str, Any
 
 # state dict
 
+from collections import OrderedDict
 def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> dict[str, Tensor]:
   """
   Returns a state_dict of the object, with optional prefix.
@@ -109,7 +110,6 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> dict[str, Tensor]:
   elif isinstance(obj, dict):
     for k,v in obj.items(): state_dict.update(get_state_dict(v, f"{prefix}{str(k)}.", tensor_type))
   return state_dict
-
 def get_parameters(obj) -> list[Tensor]:
   """
   ```python exec="true" source="above" session="tensor" result="python"
@@ -151,9 +151,9 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
         continue
       if v.shape != state_dict[k].shape:
         raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
-      if isinstance(v.device, tuple):
-        if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k]).realize()
-        else: v.replace(state_dict[k].shard(v.device, v.lazydata.axis)).realize()
+      if isinstance((mlb:=v.lazydata), MultiLazyBuffer):
+        if isinstance(state_dict[k].lazydata, MultiLazyBuffer): v.replace(state_dict[k]).realize()
+        else: v.replace(state_dict[k].shard(mlb.device, mlb.axis)).realize()
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
@@ -195,8 +195,8 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     if tuple(permute_indexes) != tuple(range(len(permute_indexes))):
       intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
       assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
-      if DEBUG >= 3: print(f"WARNING: this torch load is slow. to permute {intermediate_shape} with {permute_indexes}")
-      assert storage[1] != dtypes.bfloat16, "can't permute BF16"
+      if DEBUG >= 3: print(f"WARNING: this torch load is slow. CLANG to permute {intermediate_shape} with {permute_indexes}")
+      assert storage[1] != dtypes.bfloat16, "can't CLANG permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
       ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
 

@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 #!/usr/bin/env python3
 import os, ctypes, ctypes.util, struct, platform, time
 from tinygrad.runtime.autogen import libc, qcom_dsp

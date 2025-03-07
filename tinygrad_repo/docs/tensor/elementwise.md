@@ -52,7 +52,7 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.erf
 ::: tinygrad.Tensor.gelu
 ::: tinygrad.Tensor.quick_gelu
-::: tinygrad.Tensor.leaky_relu
+::: tinygrad.Tensor.leakyrelu
 ::: tinygrad.Tensor.mish
 ::: tinygrad.Tensor.softplus
 ::: tinygrad.Tensor.softsign
@@ -63,11 +63,7 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.sub
 ::: tinygrad.Tensor.mul
 ::: tinygrad.Tensor.div
-::: tinygrad.Tensor.idiv
-::: tinygrad.Tensor.mod
-::: tinygrad.Tensor.bitwise_xor
-::: tinygrad.Tensor.bitwise_and
-::: tinygrad.Tensor.bitwise_or
+::: tinygrad.Tensor.xor
 ::: tinygrad.Tensor.lshift
 ::: tinygrad.Tensor.rshift
 ::: tinygrad.Tensor.pow

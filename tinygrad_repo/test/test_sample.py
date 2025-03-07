@@ -1,8 +1,7 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, Variable, Device
+from tinygrad import Tensor, Variable
 
-@unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU can only run kernels with up to 10 buffers")
 class TestSample(unittest.TestCase):
   def test_sample(self):
     X = Tensor.rand(10000, 50).realize()

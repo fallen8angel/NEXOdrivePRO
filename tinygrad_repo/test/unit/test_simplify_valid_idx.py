@@ -1,9 +1,9 @@
 import unittest, itertools
+from typing import Tuple
 
-from tinygrad.codegen.devectorizer import full_graph_rewrite
+from tinygrad.codegen.uopgraph import full_graph_rewrite, is_increasing
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops
-from tinygrad.codegen.symbolic import simplify_valid
+from tinygrad.ops import UOp, Ops, simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
@@ -11,7 +11,7 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
     UOp.const(dtypes.float, 0.0)
   ))
 
-def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
+def get_load_image_uop(image_shape:Tuple[int, ...], valid:UOp, idx:Tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
     UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.int.vec(2), idx), valid),
     UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
@@ -34,14 +34,14 @@ class TestHelpers(unittest.TestCase):
     f2 = (idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)
     f3 = (idx2*2)+ridx1+(-1)
 
-    self.assertFalse(f0.is_increasing())
-    self.assertTrue(f1.is_increasing())
-    self.assertTrue(f2.is_increasing())
-    self.assertTrue(f3.is_increasing())
+    self.assertFalse(is_increasing(f0))
+    self.assertTrue(is_increasing(f1))
+    self.assertTrue(is_increasing(f2))
+    self.assertTrue(is_increasing(f3))
 
     rng = UOp(Ops.RANGE, dtypes.int, arg=(2, True), src=(UOp(Ops.CONST, dtypes.int, arg=0, src=()), UOp(Ops.CONST, dtypes.int, arg=5, src=()),))
-    self.assertTrue(rng.is_increasing())
-    self.assertTrue((rng+2).is_increasing())
+    self.assertTrue(is_increasing(rng))
+    self.assertTrue(is_increasing(rng+2))
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):

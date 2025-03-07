@@ -49,10 +49,7 @@ canvas {  display: none; }
 	const getDevice = async () => {
 		if (!navigator.gpu) error("WebGPU not supported.");
 		const adapter = await navigator.gpu.requestAdapter();
-		return await adapter.requestDevice({
-			requiredFeatures: ["shader-f16"],
-			powerPreference: "high-performance"
-		});
+		return await adapter.requestDevice();
 	};
 
 	const timer = async (func, label = "") => {

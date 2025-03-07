@@ -9,8 +9,8 @@ from opendbc.car.carlog import carlog
 from opendbc.car.structs import CarParams, CarParamsT
 from opendbc.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
 from opendbc.car.fw_versions import ObdCallback, get_fw_versions_ordered, get_present_ecus, match_fw_to_car
-from opendbc.car.interfaces import get_interface_attr
 from opendbc.car.mock.values import CAR as MOCK
+from opendbc.car.values import BRANDS
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 
 from openpilot.common.params import Params
@@ -34,8 +34,9 @@ def load_interfaces(brand_names):
 def _get_interface_names() -> dict[str, list[str]]:
   # returns a dict of brand name and its respective models
   brand_names = {}
-  for brand_name, brand_models in get_interface_attr("CAR").items():
-    brand_names[brand_name] = [model.value for model in brand_models]
+  for brand in BRANDS:
+    brand_name = brand.__module__.split('.')[-2]
+    brand_names[brand_name] = [model.value for model in brand]
 
   return brand_names
 
