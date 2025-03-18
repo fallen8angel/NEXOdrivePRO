@@ -27,17 +27,17 @@ const LongitudinalLimits HYUNDAI_LONG_LIMITS = {
 };
 
 const CanMsg HYUNDAI_TX_MSGS[] = {
-  {593, 2, 8},                              // MDPS12, Bus 2
-  {832, 0, 8},                              // LKAS11, Bus 0
-  {1056, 0, 8},                             // SCC11, Bus 0
-  {1057, 0, 8},                             // SCC12, Bus 0
-  {1290, 0, 8},                             // SCC13, Bus 0
-  {905, 0, 8},                              // SCC14, Bus 0
-  {909, 0, 8},                              // FCA11 Bus 0
-  {1155, 0, 8},                             // FCA12 Bus 0
-  {1157, 0, 4},                             // LFAHDA_MFC, Bus 0
-  {1186, 0, 8},                             // FRT_RADAR11, Bus 0
-  {1265, 0, 4}, {1265, 2, 4},               // CLU11, Bus 0, 2
+  {593, 2, 8, false},                              // MDPS12, Bus 2
+  {832, 0, 8, true},                              // LKAS11, Bus 0
+  {1056, 0, 8, false},                             // SCC11, Bus 0
+  {1057, 0, 8, false},                             // SCC12, Bus 0
+  {1290, 0, 8, false},                             // SCC13, Bus 0
+  {905, 0, 8, false},                              // SCC14, Bus 0
+  {909, 0, 8, false},                              // FCA11 Bus 0
+  {1155, 0, 8, false},                             // FCA12 Bus 0
+  {1157, 0, 4, false},                             // LFAHDA_MFC, Bus 0
+  {1186, 0, 8, false},                             // FRT_RADAR11, Bus 0
+  {1265, 0, 4, false}, {1265, 2, 4, false},               // CLU11, Bus 0, 2
 };
 
 #define HYUNDAI_COMMON_RX_CHECKS(legacy)                                                                                                                  \
@@ -177,8 +177,6 @@ static void hyundai_rx_hook(const CANPacket_t *to_push) {
       brake_pressed = ((GET_BYTE(to_push, 5) >> 5U) & 0x3U) == 0x2U;
     }
 
-    gas_pressed = brake_pressed = false;
-
     bool stock_ecu_detected = (addr == 0x340);
 
     // If openpilot is controlling longitudinal we need to ensure the radar is turned off
@@ -272,19 +270,15 @@ static bool hyundai_tx_hook(const CANPacket_t *to_send) {
   return tx;
 }
 
-static int hyundai_fwd_hook(int bus_num, int addr) {
-
-  int bus_fwd = -1;
+static bool hyundai_fwd_hook(int bus_num, int addr) {
+  bool block_msg = false;
 
   uint32_t now = microsecond_timer_get();
 
-  // forward cam to ccan and viceversa, except lkas cmd
   if (bus_num == 0) {
-    bus_fwd = 2;
-
     if(addr == 593) {
       if(now - last_ts_mdps12_from_op < 200000) {
-        bus_fwd = -1;
+        block_msg = true;
       }
     }
   }
@@ -295,58 +289,55 @@ static int hyundai_fwd_hook(int bus_num, int addr) {
     bool is_scc_msg = addr == 1056 || addr == 1057 || addr == 1290 || addr == 905;
     bool is_fca_msg = addr == 909 || addr == 1155;
 
-    bool block_msg = is_lkas_msg || is_lfahda_msg || is_scc_msg || is_fca_msg;
-    if (!block_msg) {
-      bus_fwd = 0;
-    }
-    else {
+    block_msg = is_lkas_msg || is_lfahda_msg || is_scc_msg || is_fca_msg;
+    if(block_msg) {
       if(is_lkas_msg || is_lfahda_msg) {
         if(now - last_ts_lkas11_from_op >= 200000) {
-          bus_fwd = 0;
+          block_msg = false;
         }
       }
       else if(is_scc_msg) {
         if(now - last_ts_scc12_from_op >= 400000)
-          bus_fwd = 0;
+          block_msg = false;
       }
       else if(is_fca_msg) {
         if(now - last_ts_fca11_from_op >= 400000)
-          bus_fwd = 0;
+          block_msg = false;
       }
     }
   }
 
-  return bus_fwd;
+  return block_msg;
 }
 
 static safety_config hyundai_init(uint16_t param) {
   static const CanMsg HYUNDAI_LONG_TX_MSGS[] = {
-	  {593, 2, 8},  // MDPS12, Bus 2
-	  {832, 0, 8},  // LKAS11 Bus 0
-	  {1265, 0, 4}, {1265, 2, 4},               // CLU11, Bus 0, 2
-	  {1157, 0, 4}, // LFAHDA_MFC Bus 0
-	  {1056, 0, 8}, // SCC11 Bus 0
-	  {1057, 0, 8}, // SCC12 Bus 0
-	  {1290, 0, 8}, // SCC13 Bus 0
-	  {905, 0, 8},  // SCC14 Bus 0
-	  {1186, 0, 2}, // FRT_RADAR11 Bus 0
-	  {909, 0, 8},  // FCA11 Bus 0
-	  {1155, 0, 8}, // FCA12 Bus 0
-	  {2000, 0, 8}, // radar UDS TX addr Bus 0 (for radar disable)
+	  {593, 2, 8, false},  // MDPS12, Bus 2
+	  {832, 0, 8, true},  // LKAS11 Bus 0
+	  {1265, 0, 4, false}, {1265, 2, 4, false},               // CLU11, Bus 0, 2
+	  {1157, 0, 4, false}, // LFAHDA_MFC Bus 0
+	  {1056, 0, 8, false}, // SCC11 Bus 0
+	  {1057, 0, 8, false}, // SCC12 Bus 0
+	  {1290, 0, 8, false}, // SCC13 Bus 0
+	  {905, 0, 8, false},  // SCC14 Bus 0
+	  {1186, 0, 2, false}, // FRT_RADAR11 Bus 0
+	  {909, 0, 8, false},  // FCA11 Bus 0
+	  {1155, 0, 8, false}, // FCA12 Bus 0
+	  {2000, 0, 8, false}, // radar UDS TX addr Bus 0 (for radar disable)
 	};
 
 	static const CanMsg HYUNDAI_CAMERA_SCC_TX_MSGS[] = {
-	  {593, 2, 8},                              // MDPS12, Bus 2
-	  {832, 0, 8},                              // LKAS11, Bus 0
-	  {1056, 0, 8},                             // SCC11, Bus 0
-	  {1057, 0, 8},                             // SCC12, Bus 0
-	  {1290, 0, 8},                             // SCC13, Bus 0
-	  {905, 0, 8},                              // SCC14, Bus 0
-	  {909, 0, 8},                              // FCA11 Bus 0
-	  {1155, 0, 8},                             // FCA12 Bus 0
-	  {1157, 0, 4},                             // LFAHDA_MFC, Bus 0
-	  {1186, 0, 8},                             // FRT_RADAR11, Bus 0
-	  {1265, 0, 4}, {1265, 2, 4},               // CLU11, Bus 0, 2
+	  {593, 2, 8, false},                              // MDPS12, Bus 2
+	  {832, 0, 8, true},                              // LKAS11, Bus 0
+	  {1056, 0, 8, false},                             // SCC11, Bus 0
+	  {1057, 0, 8, false},                             // SCC12, Bus 0
+	  {1290, 0, 8, false},                             // SCC13, Bus 0
+	  {905, 0, 8, false},                              // SCC14, Bus 0
+	  {909, 0, 8, false},                              // FCA11 Bus 0
+	  {1155, 0, 8, false},                             // FCA12 Bus 0
+	  {1157, 0, 4, false},                             // LFAHDA_MFC, Bus 0
+	  {1186, 0, 8, false},                             // FRT_RADAR11, Bus 0
+	  {1265, 0, 4, false}, {1265, 2, 4, false},               // CLU11, Bus 0, 2
 	 };
 
   hyundai_common_init(param);
