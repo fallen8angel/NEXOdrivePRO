@@ -41,7 +41,7 @@ class CarInterface(CarInterfaceBase):
     return ACCEL_MIN, interp(v_current_kph, gas_max_bp, gas_max_v)
 
   @staticmethod
-  def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, experimental_long, docs) -> structs.CarParams:
+  def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, docs) -> structs.CarParams:
     ret.brand = "hyundai"
 
     cam_can = CanBus(None, fingerprint).CAM
@@ -50,10 +50,10 @@ class CarInterface(CarInterfaceBase):
 
     if ret.flags & HyundaiFlags.CANFD:
       # Shared configuration for CAN-FD cars
-      ret.experimentalLongitudinalAvailable = candidate not in CANFD_UNSUPPORTED_LONGITUDINAL_CAR
+      ret.alphaLongitudinalAvailable = candidate not in CANFD_UNSUPPORTED_LONGITUDINAL_CAR
       if lka_steering and Ecu.adas not in [fw.ecu for fw in car_fw]:
         # this needs to be figured out for cars without an ADAS ECU
-        ret.experimentalLongitudinalAvailable = False
+        ret.alphaLongitudinalAvailable = False
 
       ret.enableBsm = 0x1e5 in fingerprint[CAN.ECAN]
 
@@ -91,12 +91,12 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kpBP = [0.]
       ret.longitudinalTuning.kpV = [0.8]
       ret.longitudinalTuning.kf = 0.5
-      ret.experimentalLongitudinalAvailable = candidate not in (CANFD_UNSUPPORTED_LONGITUDINAL_CAR | CANFD_RADAR_SCC_CAR)
+      ret.alphaLongitudinalAvailable = candidate not in (CANFD_UNSUPPORTED_LONGITUDINAL_CAR | CANFD_RADAR_SCC_CAR)
     else:
       ret.longitudinalTuning.kpBP = [0.]
       ret.longitudinalTuning.kpV = [0.9]
       ret.longitudinalTuning.kf = 0.5
-      ret.experimentalLongitudinalAvailable = True #candidate not in (LEGACY_SAFETY_MODE_CAR)
+      ret.alphaLongitudinalAvailable = True #candidate not in (LEGACY_SAFETY_MODE_CAR)
 
     ret.openpilotLongitudinalControl = experimental_long and ret.experimentalLongitudinalAvailable
     ret.pcmCruise = not ret.openpilotLongitudinalControl
@@ -146,7 +146,7 @@ class CarInterface(CarInterfaceBase):
 
     else:
       # Shared configuration for non CAN-FD cars
-      ret.experimentalLongitudinalAvailable = candidate not in UNSUPPORTED_LONGITUDINAL_CAR
+      ret.alphaLongitudinalAvailable = candidate not in UNSUPPORTED_LONGITUDINAL_CAR
       ret.enableBsm = 0x58b in fingerprint[0]
 
       # Send LFA message on cars with HDA
