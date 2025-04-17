@@ -3,7 +3,7 @@ from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, \
   CANFD_UNSUPPORTED_LONGITUDINAL_CAR, \
-  UNSUPPORTED_LONGITUDINAL_CAR, HyundaiSafetyFlags, Buttons
+  UNSUPPORTED_LONGITUDINAL_CAR, HyundaiSafetyFlags, Buttons, CANFD_RADAR_SCC_CAR
 from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
 from opendbc.car.interfaces import CarInterfaceBase, ACCEL_MIN, ACCEL_MAX
 from opendbc.car.disable_ecu import disable_ecu
@@ -98,7 +98,7 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kf = 0.5
       ret.alphaLongitudinalAvailable = True #candidate not in (LEGACY_SAFETY_MODE_CAR)
 
-    ret.openpilotLongitudinalControl = experimental_long and ret.experimentalLongitudinalAvailable
+    ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
     ret.pcmCruise = not ret.openpilotLongitudinalControl
 
     ret.startingState = True
