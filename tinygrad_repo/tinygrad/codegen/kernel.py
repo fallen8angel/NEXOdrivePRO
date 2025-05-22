@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, track_rewrites, view_left, print_uops
-from tinygrad.ops import PatternMatcher, UPat
+from tinygrad.ops import PatternMatcher
 from tinygrad.spec import type_verify, shape_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
@@ -37,8 +37,7 @@ class TensorCoreOptions:
 
 class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
-    assert ast.op is Ops.SINK, ast.op
-    self.ast = ast
+    if ast.op is Ops.SINK: self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
@@ -78,7 +77,6 @@ class Kernel:
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
-    self.lds: list[bool] = [False] * len(self.bufs)
 
     # group simplifies
     self.simplify_ones()
@@ -95,14 +93,17 @@ class Kernel:
     ret.sts = self.sts[:len(ret.bufs)+len(ret.reduceops)*2] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
-    ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals, ret.lds = \
-      self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals, self.lds
+    ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
+      self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
 
     return ret
 
   @property
   def membufs(self) -> list[UOp]: return dedup([x.src[0] for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
+
+  # TODO: these need more tests or it might silently be no-op
+  def float4_axis(self, i:int): return [x-self.first_upcast for x in self.sts[i].unit_stride_axes() if x >= self.first_upcast and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
   def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
@@ -354,7 +355,7 @@ class Kernel:
       return
 
     axis = self.real_axis(opt)
-    if opt.op != OptOps.LDS: check(axis < len(self.full_shape), "invalid axis")
+    check(axis < len(self.full_shape), "invalid axis")
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
     elif opt.arg is not None:
@@ -425,9 +426,6 @@ class Kernel:
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
           padded = True
       check(padded, "nothing was padded")
-    elif opt.op is OptOps.LDS:
-      check(0 <= axis < len(self.bufs), f"invalid buffer {axis}")
-      self.lds = self.lds[:axis] + [True] + self.lds[axis+1:]
 
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
@@ -463,8 +461,7 @@ class Kernel:
 
     if self.opts.has_local and self.opts.has_shared and all_int(self.sts[0].shape[:self.first_reduce]):
       # are we grouping? (requires local shape support)
-      if not [x for x in self.sts[0].unit_stride_axes() if x >= self.first_upcast and self.sts[0].shape[x]%4 == 0] and \
-        self.first_reduce <= 2 and self.first_reduce < self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:
+      if not self.float4_axis(0) and self.first_reduce <= 2 and self.first_reduce + 1 <= self.shape_len and prod(self.sts[0].shape[:self.first_reduce]) <= 2048:  # noqa: E501
         # TODO: use 1024 if it's allowed in a smarter way
         for sz in ([256, 16] if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
@@ -506,12 +503,10 @@ class Kernel:
     for axis in to_upcast[::-1]: self.apply_opt(Opt(OptOps.UPCAST, axis, 0))
 
     # potentially do more upcasts of non reduce axes based on a heuristic
-    is_dsp = self.opts is not None and self.opts.device == "DSP"
     upcasted_axis: set[int] = set()
     while resolve(prod(self.sts[0].shape[:self.first_reduce]) >= 1024):
       xb_choices = []
-      # consider all the non reduce axes, and a 3 or 4 reduce. (128 on the DSP)
-      for axis, upcast_amount in itertools.product(range(self.first_reduce), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
+      for axis, upcast_amount in itertools.product(range(self.first_reduce), [3,4]):   # consider all the non reduce axes, and a 3 or 4 reduce
         # if we haven't upcasted it, it's not symbolic, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
         if axis not in upcasted_axis and isinstance(self.full_shape[axis], int) and self.full_shape[axis]%upcast_amount == 0 and any(st.views[-1].strides[axis] == 0 and not any(x[1] == 0 for x in self.upcasted_axis(buf_index)) for buf_index, st in enumerate(self.sts)):  # noqa: E501
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in self.sts), sum(st.views[-1].strides[axis] for st in self.sts), axis, upcast_amount))  # noqa: E501
@@ -613,12 +608,10 @@ class Kernel:
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
-            src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
-            if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
+            if swizzle: srcs[i] = src.view(get_tc_swizzle_st((src if src.op is Ops.LOAD else src.src[0]).st_arg.shape, *swizzle))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
-              local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
-                                  for i,st in enumerate(src_st.real_strides()))
+              local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st = store_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
               if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
@@ -659,41 +652,32 @@ class Kernel:
 
     return graph_rewrite(fixup_ast(self.ast), view_left)
 
-  def apply_lds(self, ast) -> UOp:
-    def transform(ctx:tuple[Kernel, set[UOp]], global_access:UOp): return None
-
-    return graph_rewrite(ast, PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), name="global_access"), transform)]), ctx=(self, set()))
-
   # **** this is the lowerer ****
 
   @track_rewrites()
-  def linearize(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> Kernel:
+  def linearize(self, name_override:Optional[str]=None) -> Kernel:
     # display the AST
     if getenv("VIZ"): graph_rewrite(self.ast, PatternMatcher([]), name="View Base AST")
 
     modified_ast = self.get_optimized_ast(name_override)
-    modified_ast = self.apply_lds(modified_ast)
-    if ast_transform is not None: modified_ast = ast_transform(self, modified_ast)
 
     if DEBUG >= 3:
       print(self.name)
-      if DEBUG >= 5: print(self.ast)
+      if getenv("RAWAST"): print(self.ast)
       for i,(buf,st) in enumerate([(buf,st) for buf,st in zip(self.bufs, self.sts) if buf.op not in {Ops.CONST, Ops.VALID}]):
-        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s} {str(st.real_strides()):30s}",
-              str(st) if DEBUG >= 4 else "")
+        print(f"{i:2d}: {str(st.shape):25s} {str(buf.src[0].dtype).replace('dtypes.',''):20s}", st.real_strides())
       print(self.applied_opts)
-      if DEBUG >= 5: print(modified_ast)
     # verify AST matches the spec after applying opts
     if __debug__: type_verify(list(modified_ast.toposort))
     # TODO: sadly modified_ast doesn't pass the shape spec because of how group_for_reduces constructs UOps, there's probably a way to fix this
     #if __debug__: type_verify(list(modified_ast.toposort), shape_spec)
 
     self.uops:list[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
-    if DEBUG >= 6: print_uops(self.uops)
+    if DEBUG >= 5: print_uops(self.uops)
     return self
 
-  def to_program(self, name_override:Optional[str]=None, ast_transform:Optional[Callable]=None) -> ProgramSpec:
-    self.linearize(name_override, ast_transform)
+  def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
+    self.linearize(name_override)
     assert self.uops[0].op is Ops.NAME, "first uop must be name"
     src = self.opts.render(self.uops)
 

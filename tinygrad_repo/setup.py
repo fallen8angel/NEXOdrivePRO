@@ -52,7 +52,7 @@ setup(name='tinygrad',
         ],
         'testing': testing_minimal + [
             "pillow",
-            "onnx==1.17.0",
+            "onnx==1.16.0",
             "onnx2torch",
             "onnxruntime",
             "opencv-python",
@@ -68,10 +68,7 @@ setup(name='tinygrad',
             "nibabel",
             "bottle",
             "ggml-python",
-            "capstone",
-            "pycocotools",
-            "boto3",
-            "pandas"
+            "capstone"
         ],
         'docs': [
             "mkdocs",
