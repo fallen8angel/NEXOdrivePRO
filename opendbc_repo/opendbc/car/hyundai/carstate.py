@@ -234,6 +234,8 @@ class CarState(CarStateBase):
     # ------------------------------------------------------------------------
     # custom
 
+    ret.blockPcmEnable = False
+
     self.cruise_unavail_cnt += 1 if cp.vl["TCS13"]["CF_VSM_Avail"] != 1 and cp.vl["TCS13"]["ACCEnable"] != 0 else -self.cruise_unavail_cnt
     self.brake_error = self.cruise_unavail_cnt > 100
 
@@ -376,6 +378,8 @@ class CarState(CarStateBase):
 
     # ------------------------------------------------------------------------
     # custom messages
+
+    ret.blockPcmEnable = False
 
     prev_lfa_btn = self.lfa_btn
     self.lfa_btn = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
