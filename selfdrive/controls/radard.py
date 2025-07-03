@@ -138,7 +138,7 @@ def match_vision_to_track(v_ego: float, model: capnp._DynamicStructReader, lead:
       path_y = interp(track.dRel, list(model.position.x), list(model.position.y))
       if abs(path_y - track.yRel) < 2.:
         return track
-    return track
+    return None
   else:
     return None
 
